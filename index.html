@@ -101,7 +101,6 @@
                     x: { 
                         title: { display: true, text: '時間軸 (LST)' },
                         ticks: {
-                            // 使用 callback 函式動態決定每個標籤的顏色
                             color: function(context) {
                                 const index = context.index;
                                 const label = context.chart.data.labels[index]; 
@@ -158,14 +157,18 @@
                     );
 
                     if (matchedStd) {
+                        // 發現重疊！紀錄該 std.id
                         matchedStdIds.add(matchedStd.id);
-                        createJointMarker(dense, matchedStd);
+                        // 【修改】重疊時不建立 joint 點，直接建立單一的 standard 測站點，並捨棄 dense 的顯示與計數
+                        createSingleMarker(matchedStd, '#3355ff');
                     } else {
+                        // 沒重疊，正常建立 dense 點
                         createSingleMarker(dense, '#ff3333');
                     }
                 });
 
                 stdList.forEach(std => {
+                    // 如果這個 std 沒有在上面跟 dense 重疊過（避免重複建立）
                     if (!matchedStdIds.has(std.id)) {
                         createSingleMarker(std, '#3355ff');
                     }
@@ -196,12 +199,12 @@
                 addSingleStationToCharts(station, color);
             });
 
-            // 新增: 儲存自訂屬性以便統計（這裡包含 1 個 dense 或 1 個 standard）
+            // 儲存自訂屬性以便統計
             marker.stationTypes = [station.type];
             allMarkers.push(marker);
         }
 
-        // 函式二：繪製完全重疊的測站
+        // 【保留防錯】舊的建立重疊站函式已不再在 fetch 中調用，若未來用不到可自行刪除
         function createJointMarker(denseStation, stdStation) {
             const marker = L.circleMarker([denseStation.lat, denseStation.lon], {
                 radius: 5, fillColor: '#3355ff', color: 'transparent', weight: 15, opacity: 0, fillOpacity: 1.0      
@@ -223,7 +226,6 @@
                 addSingleStationToCharts(denseStation, '#ff3333');
             });
 
-            // 新增: 完全重疊時，該點同時代表 1 個 dense 與 1 個 standard
             marker.stationTypes = ['dense', 'standard'];
             allMarkers.push(marker);
         }
@@ -270,14 +272,13 @@
             allMarkers.forEach(marker => {
                 // 檢查 Marker 的經緯度是否在目前畫面邊界內
                 if (bounds.contains(marker.getLatLng())) {
-                    // 根據當初註冊的型態進行加總（重疊站會同時讓兩種數量都 +1）
                     marker.stationTypes.forEach(type => {
                         if (type === 'standard') stdCount++;
                         if (type === 'dense') denseCount++;
                     });
                 }
             });
-
+            
             // 更新 DOM 顯示
             document.getElementById('count-std').textContent = stdCount;
             document.getElementById('count-dense').textContent = denseCount;
