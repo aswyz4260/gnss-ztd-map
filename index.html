@@ -47,7 +47,7 @@
         .stats-std { color: #3355ff; font-weight: bold; }
         .stats-dense { color: #ff3333; font-weight: bold; }
 
-        /* 新增：右側圖表上方的切換開關樣式 */
+        /* 右側圖表上方的切換開關樣式 */
         .chart-toggle-bar {
             background: #f0f0f0;
             padding: 8px 12px;
@@ -122,7 +122,7 @@
         let chartZTD, chartCorrE, chartCorrN;
         let allMarkers = [];
         
-        // 新增：用來暫存已點選測站的原始資料與顏色，方便切換開關時重新計算
+        // 用來暫存已點選測站的原始資料與顏色
         let activeStations = []; 
 
         function syncLegendClick(e, legendItem, legend) {
@@ -183,7 +183,10 @@
         fetch('data.json')
             .then(response => response.json())
             .then(data => {
-                timeLabels = data.times;
+                // 使用正規表達式，只保留符合 24小時制 hh:mm 格式的時間標籤
+                const timeRegex = /^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$/;
+                timeLabels = data.times.filter(label => timeRegex.test(label));
+                
                 initCharts(timeLabels);
 
                 const denseList = Object.values(data.dense_stations);
@@ -243,21 +246,21 @@
             allMarkers.push(marker);
         }
 
-        // 新增：處理數值轉換的輔助函式（若開關為 ON，則減去 08:15 的數值）
+        // 處理數值轉換的輔助函式（若開關為 ON，則減去 08:15 的數值）
         function processDataValues(station, key) {
-            const originalValues = station[key]; // 原始陣列
-            const isRelative = document.getElementById('toggle-relative').checked;
+            const originalValues = station[key]; 
+            if (!originalValues) return [];
             
+            const isRelative = document.getElementById('toggle-relative').checked;
             if (!isRelative) return originalValues;
 
             // 尋找 08:15 在時間軸中的索引
             const baseIndex = timeLabels.indexOf('08:15');
             if (baseIndex === -1 || originalValues[baseIndex] === undefined) {
-                return originalValues; // 找不到 08:15 則返回原樣
+                return originalValues; 
             }
 
             const baseValue = originalValues[baseIndex];
-            // 將陣列中的每個數值都減去 08:15 的數值
             return originalValues.map(val => val - baseValue);
         }
 
@@ -278,16 +281,17 @@
             // 根據目前的開關狀態取得對應的陣列數值
             chartZTD.data.datasets.push(datasetConfig(processDataValues(station, 'ztd')));
             chartCorrE.data.datasets.push(datasetConfig(processDataValues(station, 'corr_e')));
-            chartCorrN.data.datasets.push(datasetConfig(station, 'corr_n' ? processDataValues(station, 'corr_n') : [])); // 防止 corr_n 欄位缺失
+            // 【修正】這裡修復了原先的語法/括號錯誤
+            chartCorrN.data.datasets.push(datasetConfig(station.corr_n ? processDataValues(station, 'corr_n') : [])); 
 
             chartZTD.update();
             chartCorrE.update();
             chartCorrN.update();
         }
 
-        // 新增：當切換開關變更狀態時觸發的重繪邏輯
+        // 當切換開關變更狀態時觸發的重繪邏輯
         function handleToggleChange() {
-            // 清空目前圖表上的 dataset，但不影響已記錄在 activeStations 的測站
+            // 清空目前圖表上的 dataset
             chartZTD.data.datasets = [];
             chartCorrE.data.datasets = [];
             chartCorrN.data.datasets = [];
