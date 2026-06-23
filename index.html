@@ -10,7 +10,11 @@
         body, html { width: 100%; height: 100%; font-family: -apple-system, sans-serif; overflow: hidden; }
         .container { display: flex; width: 100%; height: 100%; }
         .left-panel { width: 50%; height: 100%; position: relative; }
-        .right-panel { width: 50%; height: 100%; display: flex; flex-direction: column; padding: 10px; background: #fdfdfd; gap: 10px; overflow-y: auto; }
+        
+        /* 右側面板調整為 flex 佈局，讓控制列固定在最上方 */
+        .right-panel { width: 50%; height: 100%; display: flex; flex-direction: column; padding: 10px; background: #fdfdfd; gap: 10px; }
+        .charts-scroll-container { flex: 1; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+        
         #map { width: 100%; height: 100%; }
         .chart-container { flex: 1; min-height: 250px; position: relative; background: white; border: 1px solid #ddd; padding: 8px; border-radius: 4px; }
         
@@ -36,12 +40,40 @@
             font-size: 13px;
             color: #333;
             line-height: 1.5;
-            pointer-events: none; /* 點擊穿透，不影響地圖操作 */
+            pointer-events: none;
             min-width: 140px;
         }
         .stats-title { font-weight: bold; margin-bottom: 4px; border-bottom: 1px solid #ddd; padding-bottom: 2px; }
         .stats-std { color: #3355ff; font-weight: bold; }
         .stats-dense { color: #ff3333; font-weight: bold; }
+
+        /* 新增：右側圖表上方的切換開關樣式 */
+        .chart-toggle-bar {
+            background: #f0f0f0;
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+        }
+        .switch {
+            position: relative; display: inline-block; width: 46px; height: 22px;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc; transition: .3s; border-radius: 22px;
+        }
+        .slider:before {
+            position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px;
+            background-color: white; transition: .3s; border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #28a745; }
+        input:checked + .slider:before { transform: translateX(24px); }
     </style>
 </head>
 <body>
@@ -60,9 +92,19 @@
         </div>
         
         <div class="right-panel">
-            <div class="chart-container"><canvas id="chartZTD"></canvas></div>
-            <div class="chart-container"><canvas id="chartCorrE"></canvas></div>
-            <div class="chart-container"><canvas id="chartCorrN"></canvas></div>
+            <div class="chart-toggle-bar">
+                <span>相對變化量 (扣除 08:15 值)</span>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-relative" onchange="handleToggleChange()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="charts-scroll-container">
+                <div class="chart-container"><canvas id="chartZTD"></canvas></div>
+                <div class="chart-container"><canvas id="chartCorrE"></canvas></div>
+                <div class="chart-container"><canvas id="chartCorrN"></canvas></div>
+            </div>
         </div>
     </div>
 
@@ -78,9 +120,10 @@
 
         let timeLabels = [];
         let chartZTD, chartCorrE, chartCorrN;
-        
-        // 用來存放所有 Marker 的陣列，以便後續比對範圍
         let allMarkers = [];
+        
+        // 新增：用來暫存已點選測站的原始資料與顏色，方便切換開關時重新計算
+        let activeStations = []; 
 
         function syncLegendClick(e, legendItem, legend) {
             const index = legendItem.datasetIndex;
@@ -137,7 +180,6 @@
             });
         }
 
-        // 讀取資料並做重疊空間分析
         fetch('data.json')
             .then(response => response.json())
             .then(data => {
@@ -146,7 +188,6 @@
 
                 const denseList = Object.values(data.dense_stations);
                 const stdList = Object.values(data.standard_stations);
-                
                 const matchedStdIds = new Set();
 
                 denseList.forEach(dense => {
@@ -157,29 +198,23 @@
                     );
 
                     if (matchedStd) {
-                        // 發現重疊！紀錄該 std.id
                         matchedStdIds.add(matchedStd.id);
-                        // 【修改】重疊時不建立 joint 點，直接建立單一的 standard 測站點，並捨棄 dense 的顯示與計數
                         createSingleMarker(matchedStd, '#3355ff');
                     } else {
-                        // 沒重疊，正常建立 dense 點
                         createSingleMarker(dense, '#ff3333');
                     }
                 });
 
                 stdList.forEach(std => {
-                    // 如果這個 std 沒有在上面跟 dense 重疊過（避免重複建立）
                     if (!matchedStdIds.has(std.id)) {
                         createSingleMarker(std, '#3355ff');
                     }
                 });
 
-                // 資料載入完成後，先手動計算一次初始畫面的測站數量
                 updateVisibleStats();
             })
             .catch(err => console.error("資料加載失敗:", err));
 
-        // 函式一：繪製獨立測站
         function createSingleMarker(station, color) {
             const marker = L.circleMarker([station.lat, station.lon], {
                 radius: 5, fillColor: color, color: 'transparent', weight: 15, opacity: 0, fillOpacity: 0.9      
@@ -196,41 +231,36 @@
             marker.bindPopup(popupContent);
 
             marker.on('click', () => {
+                // 點擊時，同時保存到 activeStations 陣列
+                const exists = activeStations.some(s => s.station.id === station.id);
+                if (!exists) {
+                    activeStations.push({ station, color });
+                }
                 addSingleStationToCharts(station, color);
             });
 
-            // 儲存自訂屬性以便統計
             marker.stationTypes = [station.type];
             allMarkers.push(marker);
         }
 
-        // 【保留防錯】舊的建立重疊站函式已不再在 fetch 中調用，若未來用不到可自行刪除
-        function createJointMarker(denseStation, stdStation) {
-            const marker = L.circleMarker([denseStation.lat, denseStation.lon], {
-                radius: 5, fillColor: '#3355ff', color: 'transparent', weight: 15, opacity: 0, fillOpacity: 1.0      
-            }).addTo(map);
+        // 新增：處理數值轉換的輔助函式（若開關為 ON，則減去 08:15 的數值）
+        function processDataValues(station, key) {
+            const originalValues = station[key]; // 原始陣列
+            const isRelative = document.getElementById('toggle-relative').checked;
+            
+            if (!isRelative) return originalValues;
 
-            const popupContent = `
-                <strong style="color:#000000;">● Dense & Standard</strong><br>
-                <hr style="margin: 4px 0; border: 0; border-top: 1px solid #ccc;">
-                <strong>經緯度:</strong> ${denseStation.lon.toFixed(4)}°E, ${denseStation.lat.toFixed(4)}°N<br>
-                <span style="color:#ff3333">■ Dense ID:</span> ${denseStation.id}<br>
-                <span style="color:#ff3333">■ Dense 海拔:</span> ${denseStation.alt.toFixed(1)} m<br>
-                <span style="color:#3355ff">■ Std ID:</span> ${stdStation.id}<br>
-                <span style="color:#3355ff">■ Std 海拔:</span> ${stdStation.alt.toFixed(1)} m
-            `;
-            marker.bindPopup(popupContent);
+            // 尋找 08:15 在時間軸中的索引
+            const baseIndex = timeLabels.indexOf('08:15');
+            if (baseIndex === -1 || originalValues[baseIndex] === undefined) {
+                return originalValues; // 找不到 08:15 則返回原樣
+            }
 
-            marker.on('click', () => {
-                addSingleStationToCharts(stdStation, '#3355ff');
-                addSingleStationToCharts(denseStation, '#ff3333');
-            });
-
-            marker.stationTypes = ['dense', 'standard'];
-            allMarkers.push(marker);
+            const baseValue = originalValues[baseIndex];
+            // 將陣列中的每個數值都減去 08:15 的數值
+            return originalValues.map(val => val - baseValue);
         }
 
-        // 輔助函式：將單一測站資料推入 Chart.js
         function addSingleStationToCharts(station, color) {
             const exists = chartZTD.data.datasets.some(ds => ds.label === station.id);
             if (exists) return;
@@ -245,16 +275,31 @@
                 pointRadius: 1.5
             });
 
-            chartZTD.data.datasets.push(datasetConfig(station.ztd));
-            chartCorrE.data.datasets.push(datasetConfig(station.corr_e));
-            chartCorrN.data.datasets.push(datasetConfig(station.corr_n));
+            // 根據目前的開關狀態取得對應的陣列數值
+            chartZTD.data.datasets.push(datasetConfig(processDataValues(station, 'ztd')));
+            chartCorrE.data.datasets.push(datasetConfig(processDataValues(station, 'corr_e')));
+            chartCorrN.data.datasets.push(datasetConfig(station, 'corr_n' ? processDataValues(station, 'corr_n') : [])); // 防止 corr_n 欄位缺失
 
             chartZTD.update();
             chartCorrE.update();
             chartCorrN.update();
         }
 
+        // 新增：當切換開關變更狀態時觸發的重繪邏輯
+        function handleToggleChange() {
+            // 清空目前圖表上的 dataset，但不影響已記錄在 activeStations 的測站
+            chartZTD.data.datasets = [];
+            chartCorrE.data.datasets = [];
+            chartCorrN.data.datasets = [];
+
+            // 重新將暫存的測站資料依據新的開關狀態塞入圖表
+            activeStations.forEach(item => {
+                addSingleStationToCharts(item.station, item.color);
+            });
+        }
+
         function clearAllCharts() {
+            activeStations = []; // 同步清空暫存陣列
             chartZTD.data.datasets = [];
             chartCorrE.data.datasets = [];
             chartCorrN.data.datasets = [];
@@ -263,14 +308,12 @@
             chartCorrN.update();
         }
 
-        // 計算目前地圖視野範圍內測站數量的函式
         function updateVisibleStats() {
-            const bounds = map.getBounds(); // 取得目前地圖的可視邊界
+            const bounds = map.getBounds();
             let stdCount = 0;
             let denseCount = 0;
 
             allMarkers.forEach(marker => {
-                // 檢查 Marker 的經緯度是否在目前畫面邊界內
                 if (bounds.contains(marker.getLatLng())) {
                     marker.stationTypes.forEach(type => {
                         if (type === 'standard') stdCount++;
@@ -279,12 +322,10 @@
                 }
             });
             
-            // 更新 DOM 顯示
             document.getElementById('count-std').textContent = stdCount;
             document.getElementById('count-dense').textContent = denseCount;
         }
 
-        // 監聽地圖移動、縮放結束事件，即時更新統計數值
         map.on('moveend', updateVisibleStats);
 
     </script>
