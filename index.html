@@ -11,7 +11,7 @@
         .container { display: flex; width: 100%; height: 100%; }
         .left-panel { width: 50%; height: 100%; position: relative; }
         
-        /* 右側面板調整為 flex 佈局，讓控制列固定在最上方 */
+        /* 右側面板: 控制列固定在最上方 */
         .right-panel { width: 50%; height: 100%; display: flex; flex-direction: column; padding: 10px; background: #fdfdfd; gap: 10px; }
         .charts-scroll-container { flex: 1; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
         
@@ -281,7 +281,6 @@
             // 根據目前的開關狀態取得對應的陣列數值
             chartZTD.data.datasets.push(datasetConfig(processDataValues(station, 'ztd')));
             chartCorrE.data.datasets.push(datasetConfig(processDataValues(station, 'corr_e')));
-            // 【修正】這裡修復了原先的語法/括號錯誤
             chartCorrN.data.datasets.push(datasetConfig(station.corr_n ? processDataValues(station, 'corr_n') : [])); 
 
             chartZTD.update();
