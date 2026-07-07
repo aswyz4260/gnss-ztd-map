@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GNSS ZTD site map & charts</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html { width: 100%; height: 100%; font-family: -apple-system, sans-serif; overflow: hidden; }
+        .container { display: flex; width: 100%; height: 100%; }
+        .left-panel { width: 50%; height: 100%; position: relative; }
+        .right-panel { width: 50%; height: 100%; display: flex; flex-direction: column; padding: 10px; background: #fdfdfd; gap: 10px; overflow-y: auto; }
+        #map { width: 100%; height: 100%; }
+        .chart-container { flex: 1; min-height: 250px; position: relative; background: white; border: 1px solid #ddd; padding: 8px; border-radius: 4px; }
+        
+        /* 控制按鈕與統計面板的容器 */
+        .control-panel {
+            position: absolute; top: 10px; right: 10px; z-index: 1000;
+            display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
+        }
+        .clear-btn {
+            background: white; border: 2px solid #ccc; padding: 8px 15px;
+            font-weight: bold; cursor: pointer; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            width: 100%; text-align: center;
+        }
+        .clear-btn:hover { background: #f4f4f4; border-color: #999; }
+        
+        /* 統計面板樣式 */
+        .stats-panel {
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #ccc;
+            padding: 10px 12px;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+            font-size: 13px;
+            color: #333;
+            line-height: 1.5;
+            pointer-events: none; /* 點擊穿透，不影響地圖操作 */
+            min-width: 140px;
+        }
+        .stats-title { font-weight: bold; margin-bottom: 4px; border-bottom: 1px solid #ddd; padding-bottom: 2px; }
+        .stats-std { color: #3355ff; font-weight: bold; }
+        .stats-dense { color: #ff3333; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="left-panel">
+            <div class="control-panel">
+                <button class="clear-btn" onclick="clearAllCharts()">全部清除</button>
+                <div class="stats-panel">
+                    <div class="stats-title">畫面內測站統計</div>
+                    <div>Standard: <span id="count-std" class="stats-std">0</span> 個</div>
+                    <div>Dense: <span id="count-dense" class="stats-dense">0</span> 個</div>
+                </div>
+            </div>
+            <div id="map"></div>
+        </div>
+        
+        <div class="right-panel">
+            <div class="chart-container"><canvas id="chartZTD"></canvas></div>
+            <div class="chart-container"><canvas id="chartCorrE"></canvas></div>
+            <div class="chart-container"><canvas id="chartCorrN"></canvas></div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+        const map = L.map('map').setView([25.0, 121.5], 10);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        let timeLabels = [];
+        let chartZTD, chartCorrE, chartCorrN;
+        
+        // 用來存放所有 Marker 的陣列，以便後續比對範圍
+        let allMarkers = [];
+
+        function syncLegendClick(e, legendItem, legend) {
+            const index = legendItem.datasetIndex;
+            const charts = [chartZTD, chartCorrE, chartCorrN];
+            
+            charts.forEach(chart => {
+                const meta = chart.getDatasetMeta(index);
+                meta.hidden = meta.hidden === null ? !chart.data.datasets[index].hidden : null;
+                chart.update();
+            });
+        }
+
+        function initCharts(labels) {
+            const commonOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: { 
+                    x: { 
+                        title: { display: true, text: '時間軸 (LST)' },
+                        ticks: {
+                            // 使用 callback 函式動態決定每個標籤的顏色
+                            color: function(context) {
+                                const index = context.index;
+                                const label = context.chart.data.labels[index]; 
+                                if (label >= '10:15' && label <= '12:45') {
+                                    return '#28a745'; 
+                                }
+                                return '#666666'; 
+                            }
+                        }
+                    } 
+                },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: { boxWidth: 12, font: { size: 10 } },
+                        onClick: syncLegendClick
+                    }
+                }
+            };
+
+            chartZTD = new Chart(document.getElementById('chartZTD').getContext('2d'), {
+                type: 'line', data: { labels: labels, datasets: [] },
+                options: { ...commonOptions, plugins: { ...commonOptions.plugins, title: { display: true, text: 'Zenith Total Delay (ZTD)' } } }
+            });
+
+            chartCorrE = new Chart(document.getElementById('chartCorrE').getContext('2d'), {
+                type: 'line', data: { labels: labels, datasets: [] },
+                options: { ...commonOptions, plugins: { ...commonOptions.plugins, title: { display: true, text: 'CORR_E' } } }
+            });
+
+            chartCorrN = new Chart(document.getElementById('chartCorrN').getContext('2d'), {
+                type: 'line', data: { labels: labels, datasets: [] },
+                options: { ...commonOptions, plugins: { ...commonOptions.plugins, title: { display: true, text: 'CORR_N' } } }
+            });
+        }
+
+        // 讀取資料並做重疊空間分析
+        fetch('case_0704.json')
+            .then(response => response.json())
+            .then(data => {
+                timeLabels = data.times;
+                initCharts(timeLabels);
+
+                const denseList = Object.values(data.dense_stations);
+                const stdList = Object.values(data.standard_stations);
+                
+                const matchedStdIds = new Set();
+
+                denseList.forEach(dense => {
+                    const matchedStd = stdList.find(std => 
+                        !matchedStdIds.has(std.id) && 
+                        Math.abs(dense.lat - std.lat) < 0.0001 && 
+                        Math.abs(dense.lon - std.lon) < 0.0001
+                    );
+
+                    if (matchedStd) {
+                        matchedStdIds.add(matchedStd.id);
+                        createJointMarker(dense, matchedStd);
+                    } else {
+                        createSingleMarker(dense, '#ff3333');
+                    }
+                });
+
+                stdList.forEach(std => {
+                    if (!matchedStdIds.has(std.id)) {
+                        createSingleMarker(std, '#3355ff');
+                    }
+                });
+
+                // 資料載入完成後，先手動計算一次初始畫面的測站數量
+                updateVisibleStats();
+            })
+            .catch(err => console.error("資料加載失敗:", err));
+
+        // 函式一：繪製獨立測站
+        function createSingleMarker(station, color) {
+            const marker = L.circleMarker([station.lat, station.lon], {
+                radius: 5, fillColor: color, color: 'transparent', weight: 15, opacity: 0, fillOpacity: 0.9      
+            }).addTo(map);
+
+            const typeLabel = station.type === 'dense' ? '<span style="color:#ff3333">Dense</span>' : '<span style="color:#3355ff">Standard</span>';
+            const popupContent = `
+                <strong>測站類型:</strong> ${typeLabel}<br>
+                <strong>測站名稱:</strong> ${station.id}<br>
+                <strong>緯度(Lat):</strong> ${station.lat.toFixed(4)}°N<br>
+                <strong>經度(Lon):</strong> ${station.lon.toFixed(4)}°E<br>
+                <strong>海拔(Alt):</strong> ${station.alt.toFixed(1)} m
+            `;
+            marker.bindPopup(popupContent);
+
+            marker.on('click', () => {
+                addSingleStationToCharts(station, color);
+            });
+
+            // 新增: 儲存自訂屬性以便統計（這裡包含 1 個 dense 或 1 個 standard）
+            marker.stationTypes = [station.type];
+            allMarkers.push(marker);
+        }
+
+        // 函式二：繪製完全重疊的測站
+        function createJointMarker(denseStation, stdStation) {
+            const marker = L.circleMarker([denseStation.lat, denseStation.lon], {
+                radius: 5, fillColor: '#3355ff', color: 'transparent', weight: 15, opacity: 0, fillOpacity: 1.0      
+            }).addTo(map);
+
+            const popupContent = `
+                <strong style="color:#000000;">● Dense & Standard</strong><br>
+                <hr style="margin: 4px 0; border: 0; border-top: 1px solid #ccc;">
+                <strong>經緯度:</strong> ${denseStation.lon.toFixed(4)}°E, ${denseStation.lat.toFixed(4)}°N<br>
+                <span style="color:#ff3333">■ Dense ID:</span> ${denseStation.id}<br>
+                <span style="color:#ff3333">■ Dense 海拔:</span> ${denseStation.alt.toFixed(1)} m<br>
+                <span style="color:#3355ff">■ Std ID:</span> ${stdStation.id}<br>
+                <span style="color:#3355ff">■ Std 海拔:</span> ${stdStation.alt.toFixed(1)} m
+            `;
+            marker.bindPopup(popupContent);
+
+            marker.on('click', () => {
+                addSingleStationToCharts(stdStation, '#3355ff');
+                addSingleStationToCharts(denseStation, '#ff3333');
+            });
+
+            // 新增: 完全重疊時，該點同時代表 1 個 dense 與 1 個 standard
+            marker.stationTypes = ['dense', 'standard'];
+            allMarkers.push(marker);
+        }
+
+        // 輔助函式：將單一測站資料推入 Chart.js
+        function addSingleStationToCharts(station, color) {
+            const exists = chartZTD.data.datasets.some(ds => ds.label === station.id);
+            if (exists) return;
+
+            const datasetConfig = (dataValues) => ({
+                label: station.id,
+                data: dataValues,
+                borderColor: color,
+                backgroundColor: color,
+                borderWidth: 2,
+                tension: 0.1,
+                pointRadius: 1.5
+            });
+
+            chartZTD.data.datasets.push(datasetConfig(station.ztd));
+            chartCorrE.data.datasets.push(datasetConfig(station.corr_e));
+            chartCorrN.data.datasets.push(datasetConfig(station.corr_n));
+
+            chartZTD.update();
+            chartCorrE.update();
+            chartCorrN.update();
+        }
+
+        function clearAllCharts() {
+            chartZTD.data.datasets = [];
+            chartCorrE.data.datasets = [];
+            chartCorrN.data.datasets = [];
+            chartZTD.update();
+            chartCorrE.update();
+            chartCorrN.update();
+        }
+
+        // 計算目前地圖視野範圍內測站數量的函式
+        function updateVisibleStats() {
+            const bounds = map.getBounds(); // 取得目前地圖的可視邊界
+            let stdCount = 0;
+            let denseCount = 0;
+
+            allMarkers.forEach(marker => {
+                // 檢查 Marker 的經緯度是否在目前畫面邊界內
+                if (bounds.contains(marker.getLatLng())) {
+                    // 根據當初註冊的型態進行加總（重疊站會同時讓兩種數量都 +1）
+                    marker.stationTypes.forEach(type => {
+                        if (type === 'standard') stdCount++;
+                        if (type === 'dense') denseCount++;
+                    });
+                }
+            });
+
+            // 更新 DOM 顯示
+            document.getElementById('count-std').textContent = stdCount;
+            document.getElementById('count-dense').textContent = denseCount;
+        }
+
+        // 監聽地圖移動、縮放結束事件，即時更新統計數值
+        map.on('moveend', updateVisibleStats);
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GNSS & CWA Site Map</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html { width: 100%; height: 100%; font-family: -apple-system, sans-serif; overflow: hidden; }
+        
+        /* 整體容器保持 Flex 佈局 */
+        .container { display: flex; width: 100%; height: 100%; position: relative; }
+        
+        /* 左右面板 */
+        .left-panel { width: 50%; height: 100%; position: relative; min-width: 200px; }
+        .right-panel { width: calc(50% - 8px); height: 100%; display: flex; flex-direction: column; padding: 10px; background: #fdfdfd; gap: 10px; overflow-y: auto; min-width: 200px; }
+        
+        /* 自由拖曳的分隔線樣式 */
+        .resizer {
+            width: 8px;
+            height: 100%;
+            background: #e0e0e0;
+            cursor: col-resize;
+            position: relative;
+            transition: background 0.2s;
+        }
+        .resizer:hover, .resizer.dragging {
+            background: #2196F3;
+        }
+
+        #map { width: 100%; height: 100%; background: #e0e0e0; }
+        
+        /* 右側圖表上方控制列 */
+        .chart-control-bar {
+            background: white;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 14px;
+        }
+        .selected-date-display {
+            font-weight: bold;
+            color: #333;
+        }
+        .time-range-buttons {
+            display: flex;
+            gap: 6px;
+        }
+        .range-btn {
+            padding: 5px 12px;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .range-btn:hover {
+            border-color: #2196F3;
+            color: #2196F3;
+        }
+        .range-btn.active {
+            background: #2196F3;
+            color: white;
+            border-color: #2196F3;
+        }
+
+        .chart-container { flex: 1; min-height: 250px; position: relative; background: white; border: 1px solid #ddd; padding: 8px; border-radius: 4px; }
+        
+        /* CWA 自訂正方形標記樣式 */
+        .cwa-square-marker {
+            border: 1px solid #ffffff;
+            width: 6px !important;
+            height: 6px !important;
+            margin-left: -3px !important;
+            margin-top: -3px !important;
+            box-shadow: 0 0 2px rgba(0,0,0,0.4);
+            transition: outline 0.15s ease;
+        }
+        .cwa-red { background-color: red; }
+        .cwa-orange { background-color: orange; }
+        .cwa-green { background-color: green; }
+
+        /* 當對應的 CWA 站點被選中時加上黑框 */
+        .cwa-square-marker.highlight-target {
+            outline: 2px solid #000000 !important;
+            outline-offset: 1px;
+            z-index: 99999 !important;
+        }
+
+        /* 地圖右上角自訂日期選單控制面板 */
+        .map-date-control {
+            background: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 13px;
+            font-weight: bold;
+            color: #333;
+        }
+        .map-date-input {
+            padding: 5px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            outline: none;
+            cursor: pointer;
+        }
+        .map-date-input:focus { border-color: #2196F3; }
+
+        /* 地圖右下角自訂開關控制面板 */
+        .map-switch-control {
+            background: white;
+            padding: 8px 12px;
+            border-radius: 20px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        /* 左右切換開關 */
+        .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc; transition: .3s; border-radius: 22px;
+        }
+        .slider:before {
+            position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px;
+            background-color: white; transition: .3s; border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #2196F3; }
+        input:checked + .slider:before { transform: translateX(18px); }
+    </style>
+</head>
+<body>
+
+    <div class="container" id="mainContainer">
+        <div class="left-panel" id="leftPanel">
+            <div id="map"></div>
+        </div>
+        
+        <div class="resizer" id="dragResizer"></div>
+        
+        <div class="right-panel" id="rightPanel">
+            <div class="chart-control-bar">
+                <div class="selected-date-display" id="chartHeaderTitle">觀測日期：-｜GNSS：-｜站名：-</div>
+                <div class="time-range-buttons">
+                    <button class="range-btn active" data-days="1">1天</button>
+                    <button class="range-btn" data-days="3">3天</button>
+                    <button class="range-btn" data-days="7">7天</button>
+                    <button class="range-btn" data-days="30">1個月</button>
+                </div>
+            </div>
+
+            <div class="chart-container"><canvas id="chartTP"></canvas></div>
+            <div class="chart-container"><canvas id="chartZTDPrecip"></canvas></div>
+            <div class="chart-container"><canvas id="chartPWPrecip"></canvas></div>
+        </div>
+    </div>
+
+    <script>
+        // 全局狀態變數（💡 線上 2022 Demo 專版預設切換為 2022 年任意有資料日期）
+        let currentSelectedDate = '2022-06-01'; 
+        let currentSelectedDays = 1;
+        let currentActiveGNSSStation = null;
+
+        // 初始化地圖
+        const map = L.map('map').setView([25.0377, 121.5139], 10);
+
+        L.tileLayer('https://api.maptiler.com/maps/outdoor-v4/{z}/{x}/{y}.png?key=guLVkN40wtNI57NENdrG', {
+            tileSize: 512,       
+            zoomOffset: -1,      
+            minZoom: 1,
+            maxZoom: 19,
+            attribution: '<a href="https://www.maptiler.com/copyright/" target="_blank">© MapTiler</a> © OpenStreetMap contributors'
+        }).addTo(map);
+
+        // 自訂背景文字插件 (NO RAIN DATA)
+        const noDataPlugin = {
+            id: 'noDataPlugin',
+            afterDraw: (chart) => {
+                const hasRainData = chart.data.datasets.slice(1).some(ds => ds.data && ds.data.length > 0);
+                if (chart.data.datasets.length <= 1 || !hasRainData) {
+                    const { ctx, width, height } = chart;
+                    ctx.save();
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    ctx.font = 'bold 20px -apple-system, sans-serif'; ctx.fillStyle = 'rgba(150, 150, 150, 0.6)';
+                    ctx.fillText('NO RAIN DATA', width / 2, height / 2 + 10);
+                    ctx.restore();
+                }
+            }
+        };
+
+        // 自訂背景文字插件 (NO GNSS DATA)
+        const noGnssDataPlugin = {
+            id: 'noGnssDataPlugin',
+            afterDraw: (chart) => {
+                const hasData = chart.data.datasets.some(dataset => dataset.data && dataset.data.length > 0);
+                if (!hasData) {
+                    const { ctx, width, height } = chart;
+                    ctx.save();
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    ctx.font = 'bold 20px -apple-system, sans-serif'; ctx.fillStyle = 'rgba(150, 150, 150, 0.6)';
+                    ctx.fillText('NO GNSS DATA', width / 2, height / 2 + 10);
+                    ctx.restore();
+                }
+            }
+        };
+
+        // 初始化三大整合型圖表
+        let chartTP, chartZTDPrecip, chartPWPrecip;
+        function initCharts() {
+            const commonXScale = {
+                type: 'time',
+                offset: false,
+                time: {
+                    unit: 'hour',
+                    displayFormats: { hour: 'MM/dd HH:mm', day: 'MM/dd' }
+                },
+                title: { display: true, text: '觀測時間' }
+            };
+            const commonTooltipOptions = {
+                callbacks: {
+                    title: function(context) {
+                        if (!context || !context[0]) return '';
+                        const date = new Date(context[0].parsed.x);
+                        const MM = String(date.getMonth() + 1).padStart(2, '0');
+                        const dd = String(date.getDate()).padStart(2, '0');
+                        const HH = String(date.getHours()).padStart(2, '0');
+                        const mm = String(date.getMinutes()).padStart(2, '0');
+                        return `${MM}/${dd} ${HH}:${mm}`;
+                    }
+                }
+            };
+            chartTP = new Chart(document.getElementById('chartTP').getContext('2d'), {
+                type: 'line', data: { datasets: [] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { title: { display: true, text: 'GNSS-interp. 溫度 (T) & 氣壓 (P)' }, 
+                               tooltip: commonTooltipOptions },
+                    scales: {
+                        x: commonXScale,
+                        yT: { type: 'linear', position: 'left', title: { display: true, text: '溫度 (°C)' }, ticks: { color: 'red' }, beginAtZero: false },
+                        yP: { type: 'linear', position: 'right', title: { display: true, text: '氣壓 (mbar)' }, ticks: { color: '#D9A700' }, grid: { drawOnChartArea: false }, beginAtZero: false }
+                    }
+                },
+                plugins: [noGnssDataPlugin]
+            });
+
+            chartZTDPrecip = new Chart(document.getElementById('chartZTDPrecip').getContext('2d'), {
+                type: 'bar', data: { datasets: [] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { title: { display: true, text: 'GNSS-ZTD 與 CWA-逐時降雨量' }, 
+                               tooltip: commonTooltipOptions },
+                    scales: {
+                        x: commonXScale,
+                        yZTD: { type: 'linear', position: 'left', title: { display: true, text: 'ZTD (mm)' }, beginAtZero: false },
+                        yPrecip: { type: 'linear', position: 'right', title: { display: true, text: '降雨量 (mm)' }, ticks: { color: '#3A9AD9' }, grid: { drawOnChartArea: false }, beginAtZero: true }
+                    }
+                },
+                plugins: [noDataPlugin]
+            });
+
+            chartPWPrecip = new Chart(document.getElementById('chartPWPrecip').getContext('2d'), {
+                type: 'bar', data: { datasets: [] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { title: { display: true, text: 'GNSS-PW 與 CWA-逐時降雨量' }, 
+                               tooltip: commonTooltipOptions },
+                    scales: {
+                        x: commonXScale,
+                        yPW: { type: 'linear', position: 'left', title: { display: true, text: 'PW (mm)' }, beginAtZero: false },
+                        yPrecip: { type: 'linear', position: 'right', title: { display: true, text: '降雨量 (mm)' }, ticks: { color: '#3A9AD9' }, grid: { drawOnChartArea: false }, beginAtZero: true }
+                    }
+                },
+                plugins: [noDataPlugin]
+            });
+        }
+        initCharts();
+
+        function updateHeaderTitle() {
+            if (currentActiveGNSSStation) {
+                const code = currentActiveGNSSStation["測站代號"] || '-';
+                const name = currentActiveGNSSStation["站名"] || '-';
+                document.getElementById('chartHeaderTitle').innerText = `觀測日期: ${currentSelectedDate}｜GNSS-${code}｜${name}`;
+            } else {
+                document.getElementById('chartHeaderTitle').innerText = `觀測日期: ${currentSelectedDate}｜GNSS：-｜站名：-`;
+            }
+        }
+
+        document.querySelectorAll('.range-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                currentSelectedDays = parseInt(this.getAttribute('data-days'));
+                if (currentActiveGNSSStation) {
+                    loadAndRenderStationData(currentActiveGNSSStation);
+                }
+            });
+        });
+
+        // 左右面板自由拖曳
+        const container = document.getElementById('mainContainer');
+        const leftPanel = document.getElementById('leftPanel');
+        const rightPanel = document.getElementById('rightPanel');
+        const resizer = document.getElementById('dragResizer');
+        resizer.addEventListener('mousedown', initDrag);
+        function initDrag(e) {
+            e.preventDefault(); resizer.classList.add('dragging');
+            window.addEventListener('mousemove', doDrag); window.addEventListener('mouseup', stopDrag);
+        }
+        function doDrag(e) {
+            const containerWidth = container.getBoundingClientRect().width;
+            let percentage = (e.clientX / containerWidth) * 100;
+            if (percentage < 15) percentage = 15; if (percentage > 85) percentage = 85;
+            leftPanel.style.width = percentage + '%'; rightPanel.style.width = `calc(${100 - percentage}% - 8px)`;
+            map.invalidateSize(); if (chartTP) chartTP.resize(); if (chartZTDPrecip) chartZTDPrecip.resize(); if (chartPWPrecip) chartPWPrecip.resize();
+        }
+        function stopDrag() { resizer.classList.remove('dragging'); window.removeEventListener('mousemove', doDrag); window.removeEventListener('mouseup', stopDrag); map.invalidateSize(); }
+
+        const cwaMarkersMap = {};
+        const cwaLayerGroup = L.layerGroup();
+        let globalCwaStationsConfig = {}; 
+
+        function clearCWAHighlights() {
+            Object.values(cwaMarkersMap).forEach(marker => {
+                const iconElement = marker.getElement();
+                if (iconElement) iconElement.classList.remove('highlight-target');
+            });
+        }
+
+        // 只要「使用者挑選的整個長觀測日期區間」與「CWA 運作歷史」有任何一天的重疊交集，就代表符合
+        function isCwaValidInDateRange(rangeStart, rangeEnd, cwaStartStr, cwaEndStr) {
+            const rStart = new Date(rangeStart);
+            const rEnd = new Date(rangeEnd);
+            const cStart = new Date(cwaStartStr || "2000-01-01");
+            const cEnd = cwaEndStr ? new Date(cwaEndStr) : new Date("2099-12-31");
+            return rStart <= cEnd && rEnd >= cStart;
+        }
+
+        // 精準時間判定：檢查單一觀測日期
+        function isTargetDateWithinStationPeriod(targetDateStr, stationStartStr, stationEndStr) {
+            const target = new Date(targetDateStr + "T00:00:00");
+            const start = new Date(stationStartStr || "2000-01-01");
+            const end = stationEndStr ? new Date(stationEndStr) : new Date("2099-12-31");
+            return target >= start && target <= end;
+        }
+
+        function loadAndRenderStationData(station) {
+            currentActiveGNSSStation = station;
+            updateHeaderTitle();
+            const stnCode = station["測站代號"];
+            
+            const startDate = new Date(`${currentSelectedDate}T00:00:00`);
+            const endDate = new Date(startDate.getTime() + currentSelectedDays * 24 * 60 * 60 * 1000);
+
+            // 1. 檢查 GNSS 測站在目前選擇的「觀測起始日期」是否在線
+            const isGnssValid = isTargetDateWithinStationPeriod(currentSelectedDate, station["資料起始時間"], station["撤站日期"]);
+
+            const yearsToFetch = [];
+            if (isGnssValid) {
+                for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+                    const y = d.getFullYear();
+                    if (!yearsToFetch.includes(y)) yearsToFetch.push(y);
+                }
+            }
+
+            // 💡 讀取配置改裝：建立 GNSS 異步加載清單
+            const gnssPromises = yearsToFetch.map(yr => {
+                /* --- 🌟 註解留存：原有全量本機讀檔路徑 🌟 ---
+                const filePath = yr === 2024 ? `PWV/PWV2024/${stnCode}_2024` : `PWV/PWV2001~2023/${stnCode}_all`;
+                ------------------------------------------- */
+                // 🚀 線上 2022 Only Demo 精選專用路徑：
+                const filePath = `PWV_demo/${stnCode}_2022`;
+                return fetch(filePath).then(res => res.text()).catch(() => "");
+            });
+
+            // 2. 獨立比對「最近站1」與「最近站2」，允許長時間段下兩站併行顯示
+            const primaryCwaId = station["最近站編號"];
+            const secondaryCwaId = station["最近站2編號"];
+            const validCwaIds = [];
+
+            if (primaryCwaId && globalCwaStationsConfig[primaryCwaId]) {
+                const pCwa = globalCwaStationsConfig[primaryCwaId];
+                if (isCwaValidInDateRange(startDate, endDate, pCwa["資料起始時間"], pCwa["撤站日期"])) {
+                    validCwaIds.push(primaryCwaId);
+                }
+            }
+            if (secondaryCwaId && globalCwaStationsConfig[secondaryCwaId]) {
+                const sCwa = globalCwaStationsConfig[secondaryCwaId];
+                if (isCwaValidInDateRange(startDate, endDate, sCwa["資料起始時間"], sCwa["撤站日期"])) {
+                    validCwaIds.push(secondaryCwaId);
+                }
+            }
+
+            // 連動地圖黑框更新
+            clearCWAHighlights();
+            const isCwaOpen = document.getElementById('cwaToggle').checked;
+            if (isCwaOpen) {
+                validCwaIds.forEach(id => {
+                    if (cwaMarkersMap[id]) {
+                        const el = cwaMarkersMap[id].getElement();
+                        if (el) el.classList.add('highlight-target');
+                    }
+                });
+            }
+
+            // 派發符合資格的 CWA 月份 JSON 請求
+            const cwaFilesToFetch = [];
+            validCwaIds.forEach(cwaId => {
+                const cwaConfig = globalCwaStationsConfig[cwaId];
+                let typeDir = 'auto';
+                if (cwaConfig["測站類別"] === '有人站') typeDir = 'cwa';
+                if (cwaConfig["測站類別"] === '農業站') typeDir = 'agr';
+
+                for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+                    const ymStr = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0');
+                    
+                    /* --- 🌟 註解留存：原有全量本機 JSON 讀檔路徑 🌟 ---
+                    const fileUrl = `PWV/output_json/${typeDir}/${ymStr}99.${typeDir}_hr.json`;
+                    ------------------------------------------------- */
+                    // 🚀 線上 2022 Only Demo 精選專用路徑：
+                    const fileUrl = `PWV_demo/${typeDir}_2022/${ymStr}99.${typeDir}_hr.json`;
+                    
+                    if (!cwaFilesToFetch.some(f => f.url === fileUrl && f.cwaId === cwaId)) {
+                        cwaFilesToFetch.push({ url: fileUrl, cwaId: cwaId });
+                    }
+                }
+            });
+
+            const cwaPromises = cwaFilesToFetch.map(f => {
+                return fetch(f.url).then(res => res.json()).then(json => ({ data: json, cwaId: f.cwaId })).catch(() => ({ data: null, cwaId: f.cwaId }));
+            });
+
+            Promise.all([Promise.all(gnssPromises), Promise.all(cwaPromises)]).then(([gnssTexts, cwaResults]) => {
+                let gnssDataPoints = [];
+                let cwaPrecipMap = {};
+                validCwaIds.forEach(id => { cwaPrecipMap[id] = []; });
+
+                // A. 解析 GNSS 數據
+                if (isGnssValid) {
+                    gnssTexts.forEach(txt => {
+                        if (!txt) return;
+                        const lines = txt.split('\n');
+                        lines.forEach(line => {
+                            const tokens = line.trim().split(/\s+/);
+                            if (tokens.length < 12 || tokens[0] === 'STA') return;
+
+                            const tStr = tokens[1];
+                            if (!tStr || tStr.length < 10) return;
+                            const yr = tStr.substring(0,4); const mo = tStr.substring(4,6); const dy = tStr.substring(6,8); const hr = tStr.substring(8,10);
+                            const mn = tStr.length >= 12 ? tStr.substring(10,12) : "00";
+                            const sc = tStr.length >= 14 ? tStr.substring(12,14) : "00";
+                            
+                            const pt = new Date(`${yr}-${mo}-${dy}T${hr}:${mn}:${sc}`);
+                            if (pt < startDate || pt > endDate) return;
+
+                            let p = parseFloat(tokens[2]); let t = parseFloat(tokens[3]); let ztd = parseFloat(tokens[4]); let pw = parseFloat(tokens[10]);
+
+                            gnssDataPoints.push({
+                                time: pt,
+                                p: (p < 0) ? null : p, t: (t < 0) ? null : t, ztd: (ztd < 0) ? null : ztd, pw: (pw < 0) ? null : pw
+                            });
+                        });
+                    });
+                }
+
+                // B. 解析 CWA JSON 數據格式
+                cwaResults.forEach(res => {
+                    if (!res.data || !res.data[res.cwaId]) return;
+                    const timeSeries = res.data[res.cwaId]; 
+                    timeSeries.forEach(item => {
+                        const fullTimeStr = String(item.time);
+                        if (fullTimeStr.length < 10) return;
+
+                        const yr = fullTimeStr.substring(0, 4); const mo = fullTimeStr.substring(4, 6); const dy = fullTimeStr.substring(6, 8); const hr = parseInt(fullTimeStr.substring(8, 10));
+
+                        let pt = new Date(`${yr}-${mo}-${dy}T${hr.toString().padStart(2, '0')}:00:00`);
+                        if (hr === 24) { pt = new Date(new Date(`${yr}-${mo}-${dy}T00:00:00`).getTime() + 24 * 60 * 60 * 1000); }
+
+                        if (pt < startDate || pt > endDate) return;
+
+                        let precip = item.rain;
+                        if (precip === null || precip < 0) { precip = null; }
+                        
+                        cwaPrecipMap[res.cwaId].push({ x: pt, y: precip });
+                    });
+                });
+
+                gnssDataPoints.sort((a,b) => a.time - b.time);
+                validCwaIds.forEach(id => { cwaPrecipMap[id].sort((a,b) => a.x - b.x); });
+
+                // 5. 圖表更新重繪
+                chartTP.data.datasets = [
+                    { label: `${stnCode}-Temp`, data: gnssDataPoints.map(p => ({ x: p.time, y: p.t })), borderColor: 'red', backgroundColor: 'red', yAxisID: 'yT', type: 'line', fill: false, tension: 0.1 },
+                    { label: `${stnCode}-PS`, data: gnssDataPoints.map(p => ({ x: p.time, y: p.p })), borderColor: '#D9A700', backgroundColor: '#D9A700', yAxisID: 'yP', type: 'line', fill: false, tension: 0.1 }
+                ];
+                chartTP.update();
+
+                const rainColors = {
+                    [primaryCwaId]: 'rgba(58, 154, 217, 0.6)', 
+                    [secondaryCwaId]: 'rgba(74, 219, 190, 0.6)'
+                };
+
+                let ztdDatasets = [
+                    { label: `${stnCode}-ZTD`, data: gnssDataPoints.map(p => ({ x: p.time, y: p.ztd })), borderColor: 'red', backgroundColor: 'red', yAxisID: 'yZTD', type: 'line', fill: false, tension: 0.1 }
+                ];
+                let pwDatasets = [
+                    { label: `${stnCode}—PW`, data: gnssDataPoints.map(p => ({ x: p.time, y: p.pw })), borderColor: 'blue', backgroundColor: 'blue', yAxisID: 'yPW', type: 'line', fill: false, tension: 0.1 }
+                ];
+
+                validCwaIds.forEach(id => {
+                    const datasetConfig = {
+                        label: `${id} 降雨`,
+                        data: cwaPrecipMap[id],
+                        backgroundColor: rainColors[id] || 'rgba(150, 150, 150, 0.6)',
+                        yAxisID: 'yPrecip',
+                        type: 'bar',
+                        categoryPercentage: 1.0,
+                        barPercentage: 1.0
+                    };
+                    ztdDatasets.push(JSON.parse(JSON.stringify(datasetConfig)));
+                    pwDatasets.push(JSON.parse(JSON.stringify(datasetConfig)));
+                });
+
+                if (validCwaIds.length === 0) {
+                    const fallbackDataset = { label: '無重疊 CWA 測站', data: [], yAxisID: 'yPrecip', type: 'bar' };
+                    ztdDatasets.push(fallbackDataset);
+                    pwDatasets.push(fallbackDataset);
+                }
+
+                chartZTDPrecip.data.datasets = ztdDatasets;
+                chartZTDPrecip.update();
+
+                chartPWPrecip.data.datasets = pwDatasets;
+                chartPWPrecip.update();
+            });
+        }
+
+        // 初始化地圖站點圖層
+        Promise.all([
+            fetch('gnssCWA_stations.json').then(res => res.json()),
+            fetch('CWA_stations.json').then(res => res.json())
+        ])
+        .then(([gnssData, cwaData]) => {
+            globalCwaStationsConfig = cwaData;
+
+            Object.entries(cwaData).forEach(([stationId, station]) => {
+                const lat = station["緯度_csv"]; const lon = station["經度_csv"]; const type = station["測站類別"];
+                if (lat && lon) {
+                    let colorClass = 'cwa-orange'; if (type === '有人站') colorClass = 'cwa-red'; else if (type === '農業站') colorClass = 'cwa-green';
+                    const squareIcon = L.divIcon({ className: `cwa-square-marker ${colorClass}` });
+                    const marker = L.marker([lat, lon], { icon: squareIcon });
+                    
+                    const popupContent = `
+                        站碼：${stationId}<br>
+                        站名：${station["站名"] || ''}<br>
+                        類別：${type || ''}<br>
+                        高度：${station["海拔高度_csv"] !== undefined ? station["海拔高度_csv"] + ' m' : ''}<br>
+                        經度：${lon.toFixed(4)}<br>
+                        緯度：${lat.toFixed(4)}<br>
+                        設站日期：${station["資料起始時間"] || ''}<br>
+                        撤站日期：${station["撤站日期"] || ''}
+                    `;
+                    marker.bindPopup(popupContent);
+                    cwaLayerGroup.addLayer(marker); cwaMarkersMap[stationId] = marker;
+                }
+            });
+
+            gnssData.forEach(station => {
+                const marker = L.circleMarker([station["緯度"], station["經度"]], {
+                    radius: 5, fillColor: '#0074D9', color: '#ffffff', weight: 1, opacity: 1, fillOpacity: 0.9
+                }).addTo(map);
+                
+                const popupContent = `
+                    站碼：${station["測站代號"] || ''}<br>
+                    站名：${station["站名"] || ''}<br>
+                    高度：${station["海拔高度"] !== undefined ? station["海拔高度"] + ' m' : ''}<br>
+                    經度：${station["經度"] ? station["經度"].toFixed(4) : ''}<br>
+                    緯度：${station["緯度"] ? station["緯度"].toFixed(4) : ''}<br>
+                    設站日期：${station["資料起始時間"] || ''}<br>
+                    撤站日期：${station["撤站日期"] || ''}
+                `;
+                marker.bindPopup(popupContent);
+                marker.on('click', function() { loadAndRenderStationData(station); });
+            });
+
+            const DateControl = L.Control.extend({
+                options: { position: 'topright' },
+                onAdd: function (map) {
+                    const container = L.DomUtil.create('div', 'map-date-control');
+                    container.innerHTML = `<label for="mapDatePicker">選擇觀測日期<br>since 2001-2024</label><input type="date" id="mapDatePicker" class="map-date-input" value="${currentSelectedDate}">`;
+                    L.DomEvent.disableClickPropagation(container); return container;
+                }
+            });
+            map.addControl(new DateControl());
+
+            document.getElementById('mapDatePicker').addEventListener('change', function(e) {
+                currentSelectedDate = e.target.value; updateHeaderTitle();
+                if (currentActiveGNSSStation) { loadAndRenderStationData(currentActiveGNSSStation); }
+            });
+
+            const SwitchControl = L.Control.extend({
+                options: { position: 'bottomright' }, 
+                onAdd: function (map) {
+                    const container = L.DomUtil.create('div', 'map-switch-control');
+                    container.innerHTML = `<span>CWA 測站</span><label class="switch"><input type="checkbox" id="cwaToggle"><span class="slider"></span></label>`;
+                    L.DomEvent.disableClickPropagation(container); return container;
+                }
+            });
+            map.addControl(new SwitchControl());
+
+            document.getElementById('cwaToggle').addEventListener('change', function(e) {
+                if (e.target.checked) {
+                    map.addLayer(cwaLayerGroup);
+                    if (currentActiveGNSSStation) loadAndRenderStationData(currentActiveGNSSStation);
+                } else {
+                    map.removeLayer(cwaLayerGroup); clearCWAHighlights(); 
+                }
+            });
+
+            map.on('popupclose click', function() { clearCWAHighlights(); });
+        })
+        .catch(err => console.error("測站設定檔載入失敗:", err));
+    </script>
+</body>
+</html>

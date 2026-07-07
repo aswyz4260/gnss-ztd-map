@@ -1,0 +1,8 @@
+# .gitignore
+
+PWV/
+prepare/
+index_local.html
+demo_2022.ipynb
+.DS_Store
+Thumbs.db
