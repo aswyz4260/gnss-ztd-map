@@ -385,10 +385,10 @@
 
             // 💡 讀取配置改裝：建立 GNSS 異步加載清單
             const gnssPromises = yearsToFetch.map(yr => {
-                /* --- 🌟 註解留存：原有全量本機讀檔路徑 🌟 ---
+                /* --- !!! 註解: 本機讀檔路徑 !!! ---
                 const filePath = yr === 2024 ? `PWV/PWV2024/${stnCode}_2024` : `PWV/PWV2001~2023/${stnCode}_all`;
                 ------------------------------------------- */
-                // 🚀 線上 2022 Only Demo 精選專用路徑：
+                // 2022 Only Demo
                 const filePath = `PWV_demo/${stnCode}_2022`;
                 return fetch(filePath).then(res => res.text()).catch(() => "");
             });
@@ -434,10 +434,10 @@
                 for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
                     const ymStr = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0');
                     
-                    /* --- 🌟 註解留存：原有全量本機 JSON 讀檔路徑 🌟 ---
+                    /* --- !!! 註解留存：原有本機 JSON 讀檔路徑 !!! ---
                     const fileUrl = `PWV/output_json/${typeDir}/${ymStr}99.${typeDir}_hr.json`;
                     ------------------------------------------------- */
-                    // 🚀 線上 2022 Only Demo 精選專用路徑：
+                    // 2022 Only Demo
                     const fileUrl = `PWV_demo/${typeDir}_2022/${ymStr}99.${typeDir}_hr.json`;
                     
                     if (!cwaFilesToFetch.some(f => f.url === fileUrl && f.cwaId === cwaId)) {
