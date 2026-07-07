@@ -510,8 +510,12 @@
 
                 // 5. 圖表更新重繪
                 chartTP.data.datasets = [
-                    { label: `${stnCode}-Temp`, data: gnssDataPoints.map(p => ({ x: p.time, y: p.t })), borderColor: 'red', backgroundColor: 'red', yAxisID: 'yT', type: 'line', fill: false, tension: 0.1 },
-                    { label: `${stnCode}-PS`, data: gnssDataPoints.map(p => ({ x: p.time, y: p.p })), borderColor: '#D9A700', backgroundColor: '#D9A700', yAxisID: 'yP', type: 'line', fill: false, tension: 0.1 }
+                    { label: `${stnCode}-Temp`, data: gnssDataPoints.map(p => ({ x: p.time, y: p.t })), 
+                      borderColor: 'red', backgroundColor: 'red', yAxisID: 'yT', type: 'line', fill: false, tension: 0.1,
+                      pointRadius: 0, pointHoverRadius: 2 },
+                    { label: `${stnCode}-PS`, data: gnssDataPoints.map(p => ({ x: p.time, y: p.p })), 
+                      borderColor: '#D9A700', backgroundColor: '#D9A700', yAxisID: 'yP', type: 'line', fill: false, tension: 0.1,
+                      pointRadius: 0, pointHoverRadius: 2 }
                 ];
                 chartTP.update();
 
@@ -521,10 +525,14 @@
                 };
 
                 let ztdDatasets = [
-                    { label: `${stnCode}-ZTD`, data: gnssDataPoints.map(p => ({ x: p.time, y: p.ztd })), borderColor: 'red', backgroundColor: 'red', yAxisID: 'yZTD', type: 'line', fill: false, tension: 0.1 }
+                    { label: `${stnCode}-ZTD`, data: gnssDataPoints.map(p => ({ x: p.time, y: p.ztd })), 
+                      borderColor: 'red', backgroundColor: 'red', yAxisID: 'yZTD', type: 'line', fill: false, tension: 0.1,
+                      pointRadius: 0, pointHoverRadius: 2 }
                 ];
                 let pwDatasets = [
-                    { label: `${stnCode}—PW`, data: gnssDataPoints.map(p => ({ x: p.time, y: p.pw })), borderColor: 'blue', backgroundColor: 'blue', yAxisID: 'yPW', type: 'line', fill: false, tension: 0.1 }
+                    { label: `${stnCode}—PW`, data: gnssDataPoints.map(p => ({ x: p.time, y: p.pw })), 
+                      borderColor: 'blue', backgroundColor: 'blue', yAxisID: 'yPW', type: 'line', fill: false, tension: 0.1,
+                      pointRadius: 0, pointHoverRadius: 2 }
                 ];
 
                 validCwaIds.forEach(id => {
