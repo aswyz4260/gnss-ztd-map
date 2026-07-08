@@ -521,7 +521,7 @@
 
                 const rainColors = {
                     [primaryCwaId]: 'rgba(58, 154, 217, 0.6)', 
-                    [secondaryCwaId]: 'rgba(74, 219, 190, 0.6)'
+                    [secondaryCwaId]: 'rgba(58, 154, 217, 0.6)' // rgba(74, 219, 190, 0.6)'
                 };
 
                 let ztdDatasets = [
@@ -537,7 +537,7 @@
 
                 validCwaIds.forEach(id => {
                     const datasetConfig = {
-                        label: `${id} 降雨`,
+                        label: `${id} Rain/h`,
                         data: cwaPrecipMap[id],
                         backgroundColor: rainColors[id] || 'rgba(150, 150, 150, 0.6)',
                         yAxisID: 'yPrecip',
