@@ -615,7 +615,7 @@
                 options: { position: 'topright' },
                 onAdd: function (map) {
                     const container = L.DomUtil.create('div', 'map-date-control');
-                    container.innerHTML = `<label for="mapDatePicker">選擇觀測日期<br>since 2001-2024</label><input type="date" id="mapDatePicker" class="map-date-input" value="${currentSelectedDate}">`;
+                    container.innerHTML = `<label for="mapDatePicker">選擇觀測日期<br>since 2001-2024<br>ONLY 2022 in this DEMO page</label><input type="date" id="mapDatePicker" class="map-date-input" value="${currentSelectedDate}">`;
                     L.DomEvent.disableClickPropagation(container); return container;
                 }
             });
