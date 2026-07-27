@@ -42,6 +42,36 @@
         .stats-title { font-weight: bold; margin-bottom: 4px; border-bottom: 1px solid #ddd; padding-bottom: 2px; }
         .stats-std { color: #3355ff; font-weight: bold; }
         .stats-dense { color: #ff3333; font-weight: bold; }
+
+        /* ZTD 圖表右上角模式切換按鈕容器 */
+        .ztd-mode-toggle {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            z-index: 10;
+            display: flex;
+            background: #eee;
+            border-radius: 4px;
+            padding: 2px;
+            gap: 2px;
+            border: 1px solid #ccc;
+        }
+        .ztd-mode-btn {
+            border: none;
+            background: transparent;
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 3px;
+            color: #555;
+            transition: all 0.2s ease;
+        }
+        .ztd-mode-btn.active {
+            background: #007bff;
+            color: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
     </style>
 </head>
 <body>
@@ -60,7 +90,14 @@
         </div>
         
         <div class="right-panel">
-            <div class="chart-container"><canvas id="chartZTD"></canvas></div>
+            <div class="chart-container">
+                <!-- 右上角數據切換按鈕 -->
+                <div class="ztd-mode-toggle">
+                    <button class="ztd-mode-btn active" id="btn-ztd-raw" onclick="setZtdDisplayMode('raw')">原始 ZTD</button>
+                    <button class="ztd-mode-btn" id="btn-ztd-diff" onclick="setZtdDisplayMode('diff')">相對於 08:15 (ΔZTD)</button>
+                </div>
+                <canvas id="chartZTD"></canvas>
+            </div>
             <div class="chart-container"><canvas id="chartCorrE"></canvas></div>
             <div class="chart-container"><canvas id="chartCorrN"></canvas></div>
         </div>
@@ -78,9 +115,10 @@
 
         let timeLabels = [];
         let chartZTD, chartCorrE, chartCorrN;
-        
-        // 用來存放所有 Marker 的陣列，以便後續比對範圍
         let allMarkers = [];
+
+        // 紀錄目前 ZTD 顯示模式：'raw' (原始) 或 'diff' (相對 08:15 差值)
+        let ztdDisplayMode = 'raw';
 
         function syncLegendClick(e, legendItem, legend) {
             const index = legendItem.datasetIndex;
@@ -101,7 +139,6 @@
                     x: { 
                         title: { display: true, text: '時間軸 (LST)' },
                         ticks: {
-                            // 使用 callback 函式動態決定每個標籤的顏色
                             color: function(context) {
                                 const index = context.index;
                                 const label = context.chart.data.labels[index]; 
@@ -124,7 +161,13 @@
 
             chartZTD = new Chart(document.getElementById('chartZTD').getContext('2d'), {
                 type: 'line', data: { labels: labels, datasets: [] },
-                options: { ...commonOptions, plugins: { ...commonOptions.plugins, title: { display: true, text: 'Zenith Total Delay (ZTD)' } } }
+                options: { 
+                    ...commonOptions, 
+                    plugins: { 
+                        ...commonOptions.plugins, 
+                        title: { display: true, text: 'Zenith Total Delay (ZTD)' } 
+                    } 
+                }
             });
 
             chartCorrE = new Chart(document.getElementById('chartCorrE').getContext('2d'), {
@@ -136,6 +179,42 @@
                 type: 'line', data: { labels: labels, datasets: [] },
                 options: { ...commonOptions, plugins: { ...commonOptions.plugins, title: { display: true, text: 'CORR_N' } } }
             });
+        }
+
+        // 計算相對於 08:15 的差值數據
+        function calculateRelativeZtd(rawZtdList) {
+            const baseIndex = timeLabels.indexOf('08:15');
+            if (baseIndex === -1) return rawZtdList; // 若無 08:15 時間點則回傳原數據
+            
+            return rawZtdList.map(val => {
+                const baseVal = rawZtdList[baseIndex];
+                if (val === null || val === undefined || baseVal === null || baseVal === undefined) {
+                    return null;
+                }
+                return val - baseVal;
+            });
+        }
+
+        // 切換 ZTD 顯示模式
+        function setZtdDisplayMode(mode) {
+            ztdDisplayMode = mode;
+            
+            // 更新 UI 按鈕樣式
+            document.getElementById('btn-ztd-raw').classList.toggle('active', mode === 'raw');
+            document.getElementById('btn-ztd-diff').classList.toggle('active', mode === 'diff');
+
+            // 更新圖表標題
+            const titleText = mode === 'raw' ? 'Zenith Total Delay (ZTD)' : 'Relative ZTD (ΔZTD vs 08:15)';
+            chartZTD.options.plugins.title.text = titleText;
+
+            // 重新計算與更新已存在的所有 ZTD datasets
+            chartZTD.data.datasets.forEach(ds => {
+                if (ds.rawZtdData) {
+                    ds.data = mode === 'raw' ? [...ds.rawZtdData] : calculateRelativeZtd(ds.rawZtdData);
+                }
+            });
+
+            chartZTD.update();
         }
 
         // 讀取資料並做重疊空間分析
@@ -171,12 +250,12 @@
                     }
                 });
 
-                // 資料載入完成後，先手動計算一次初始畫面的測站數量
+                // 資料載入完成後，先計算一次初始畫面的測站數量
                 updateVisibleStats();
             })
             .catch(err => console.error("資料加載失敗:", err));
 
-        // 函式一：繪製獨立測站
+        // 繪製獨立測站
         function createSingleMarker(station, color) {
             const marker = L.circleMarker([station.lat, station.lon], {
                 radius: 5, fillColor: color, color: 'transparent', weight: 15, opacity: 0, fillOpacity: 0.9      
@@ -196,19 +275,20 @@
                 addSingleStationToCharts(station, color);
             });
 
-            // 新增: 儲存自訂屬性以便統計（這裡包含 1 個 dense 或 1 個 standard）
+            // 儲存測站類型標記
             marker.stationTypes = [station.type];
             allMarkers.push(marker);
         }
 
-        // 函式二：繪製完全重疊的測站
+        // 繪製完全重疊的測站
         function createJointMarker(denseStation, stdStation) {
+            // 重疊時，優先顯示為 Standard (藍色)
             const marker = L.circleMarker([denseStation.lat, denseStation.lon], {
                 radius: 5, fillColor: '#3355ff', color: 'transparent', weight: 15, opacity: 0, fillOpacity: 1.0      
             }).addTo(map);
 
             const popupContent = `
-                <strong style="color:#000000;">● Dense & Standard</strong><br>
+                <strong style="color:#000000;">● Dense & Standard (重疊)</strong><br>
                 <hr style="margin: 4px 0; border: 0; border-top: 1px solid #ccc;">
                 <strong>經緯度:</strong> ${denseStation.lon.toFixed(4)}°E, ${denseStation.lat.toFixed(4)}°N<br>
                 <span style="color:#ff3333">■ Dense ID:</span> ${denseStation.id}<br>
@@ -223,15 +303,31 @@
                 addSingleStationToCharts(denseStation, '#ff3333');
             });
 
-            // 新增: 完全重疊時，該點同時代表 1 個 dense 與 1 個 standard
-            marker.stationTypes = ['dense', 'standard'];
+            // 【修正】重疊測站歸類為 Standard，不計算為獨立的 Dense
+            marker.stationTypes = ['standard'];
             allMarkers.push(marker);
         }
 
-        // 輔助函式：將單一測站資料推入 Chart.js
+        // 推入數據至 Chart.js
         function addSingleStationToCharts(station, color) {
             const exists = chartZTD.data.datasets.some(ds => ds.label === station.id);
             if (exists) return;
+
+            // 根據目前的 ztdDisplayMode 決定初始要呈現的 ZTD 數據
+            const displayZtdData = ztdDisplayMode === 'raw' 
+                ? [...station.ztd] 
+                : calculateRelativeZtd(station.ztd);
+
+            const ztdDataset = {
+                label: station.id,
+                data: displayZtdData,
+                rawZtdData: [...station.ztd], // 妥善保留原始 ZTD 數據，方便後續無縫切換
+                borderColor: color,
+                backgroundColor: color,
+                borderWidth: 2,
+                tension: 0.1,
+                pointRadius: 1.5
+            };
 
             const datasetConfig = (dataValues) => ({
                 label: station.id,
@@ -243,7 +339,7 @@
                 pointRadius: 1.5
             });
 
-            chartZTD.data.datasets.push(datasetConfig(station.ztd));
+            chartZTD.data.datasets.push(ztdDataset);
             chartCorrE.data.datasets.push(datasetConfig(station.corr_e));
             chartCorrN.data.datasets.push(datasetConfig(station.corr_n));
 
@@ -261,16 +357,14 @@
             chartCorrN.update();
         }
 
-        // 計算目前地圖視野範圍內測站數量的函式
+        // 計算畫面範圍內的測站數量
         function updateVisibleStats() {
-            const bounds = map.getBounds(); // 取得目前地圖的可視邊界
+            const bounds = map.getBounds();
             let stdCount = 0;
             let denseCount = 0;
 
             allMarkers.forEach(marker => {
-                // 檢查 Marker 的經緯度是否在目前畫面邊界內
                 if (bounds.contains(marker.getLatLng())) {
-                    // 根據當初註冊的型態進行加總（重疊站會同時讓兩種數量都 +1）
                     marker.stationTypes.forEach(type => {
                         if (type === 'standard') stdCount++;
                         if (type === 'dense') denseCount++;
@@ -278,12 +372,11 @@
                 }
             });
 
-            // 更新 DOM 顯示
             document.getElementById('count-std').textContent = stdCount;
             document.getElementById('count-dense').textContent = denseCount;
         }
 
-        // 監聽地圖移動、縮放結束事件，即時更新統計數值
+        // 監聽地圖移動或縮放
         map.on('moveend', updateVisibleStats);
 
     </script>
