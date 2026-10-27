@@ -176,7 +176,6 @@
     </div>
 
     <script>
-        // 全局狀態變數（💡 線上 2022 Demo 專版預設切換為 2022 年任意有資料日期）
         let currentSelectedDate = '2022-06-01'; 
         let currentSelectedDays = 1;
         let currentActiveGNSSStation = null;
@@ -224,7 +223,7 @@
             }
         };
 
-        // 初始化三大整合型圖表
+        // 初始化圖表
         let chartTP, chartZTDPrecip, chartPWPrecip;
         function initCharts() {
             const commonXScale = {
@@ -383,7 +382,6 @@
                 }
             }
 
-            // 💡 讀取配置改裝：建立 GNSS 異步加載清單
             const gnssPromises = yearsToFetch.map(yr => {
                 /* --- !!! 註解: 本機讀檔路徑 !!! ---
                 const filePath = yr === 2024 ? `PWV/PWV2024/${stnCode}_2024` : `PWV/PWV2001~2023/${stnCode}_all`;
@@ -508,7 +506,7 @@
                 gnssDataPoints.sort((a,b) => a.time - b.time);
                 validCwaIds.forEach(id => { cwaPrecipMap[id].sort((a,b) => a.x - b.x); });
 
-                // 5. 圖表更新重繪
+                // 圖表 update
                 chartTP.data.datasets = [
                     { label: `${stnCode}-Temp`, data: gnssDataPoints.map(p => ({ x: p.time, y: p.t })), 
                       borderColor: 'red', backgroundColor: 'red', yAxisID: 'yT', type: 'line', fill: false, tension: 0.1,
